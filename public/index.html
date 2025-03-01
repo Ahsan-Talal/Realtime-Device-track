@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Real-Time User Tracking</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map { height: 90vh; width: 75%; float: left; }
+    #sidebar { height: 90vh; width: 24%; float: right; overflow-y: auto; border-left: 1px solid #ccc; padding: 10px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="sidebar">
+    <h3>Active Users</h3>
+    <ul id="userList"></ul>
+  </div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const socket = io();
+    const map = L.map('map').setView([0, 0], 2);
+    const markers = {};
+    let watcherId = null;
+    let currentMarker = null;
+    let nickname = null;
+
+    // Load OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    let firstUpdate = true;
+    nickname = prompt("Enter your nickname:") || 'Anonymous';
+watcherId = navigator.geolocation.watchPosition(
+  (pos) => {
+    const { latitude, longitude } = pos.coords;
+    
+    if (firstUpdate) {
+      map.setView([latitude, longitude], 13);
+      firstUpdate = false;
+    }
+    
+    if (currentMarker) {
+      currentMarker.setLatLng([latitude, longitude]);
+      socket.emit('locationUpdate', { lat: latitude, lng: longitude });
+    } else {
+      currentMarker = L.marker([latitude, longitude])
+        .addTo(map)
+        .bindPopup(nickname);
+      markers[socket.id] = currentMarker;
+      socket.emit('newUser', { nickname, lat: latitude, lng: longitude });
+      addUserToList(socket.id, nickname);
+    }
+  },
+  (err) => {
+    alert(`Error getting location: ${err.message}`);
+    if (watcherId) navigator.geolocation.clearWatch(watcherId);
+  },
+  {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 10000
+  }
+);
+
+
+    // Cleanup when leaving page
+    window.addEventListener('beforeunload', () => {
+      if (watcherId) navigator.geolocation.clearWatch(watcherId);
+      socket.emit('userLeft');
+    });
+
+    // Socket event handlers
+    socket.on('userConnected', (data) => {
+      if (data.id === socket.id) return;
+      markers[data.id] = L.marker([data.lat, data.lng])
+        .addTo(map)
+        .bindPopup(data.nickname);
+      addUserToList(data.id, data.nickname);
+    });
+
+    socket.on('existingUsers', (users) => {
+      Object.keys(users).forEach(id => {
+        if (id !== socket.id) {
+          const user = users[id];
+          markers[id] = L.marker([user.lat, user.lng])
+            .addTo(map)
+            .bindPopup(user.nickname);
+          addUserToList(id, user.nickname);
+        }
+      });
+    });
+
+    socket.on('userUpdated', (data) => {
+      if (markers[data.id]) {
+        markers[data.id].setLatLng([data.lat, data.lng]);
+        const li = document.getElementById(`user-${data.id}`);
+        if (li) li.textContent = `${data.nickname} (updating...)`;
+        setTimeout(() => {
+          if (li) li.textContent = data.nickname;
+        }, 1000);
+      }
+    });
+
+    socket.on('userDisconnected', (data) => {
+      if (markers[data.id]) {
+        map.removeLayer(markers[data.id]);
+        delete markers[data.id];
+        removeUserFromList(data.id);
+      }
+    });
+
+    // Sidebar management
+    function addUserToList(id, nickname) {
+      if (document.getElementById(`user-${id}`)) return;
+      
+      const li = document.createElement('li');
+      li.id = `user-${id}`;
+      li.textContent = nickname;
+      li.style.cursor = 'pointer';
+      li.title = 'Click to center map';
+      
+      li.addEventListener('click', () => {
+        if (markers[id]) {
+          map.setView(markers[id].getLatLng(), 15);
+          markers[id].openPopup();
+        }
+      });
+      
+      document.getElementById('userList').appendChild(li);
+    }
+
+    function removeUserFromList(id) {
+      const li = document.getElementById(`user-${id}`);
+      if (li) li.remove();
+    }
+  </script>
+</body>
+ </html> 
