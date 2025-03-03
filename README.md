@@ -23,9 +23,7 @@ A collaborative mapping application that enables real-time location sharing betw
 git clone https://github.com/Ahsan-Talal/Realtime-Device-track.git
 
 # Install dependencies
-cd real-time-tracker
 npm install
 
-
 # Start development server
-npm run dev
+node server.js
